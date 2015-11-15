@@ -82,8 +82,8 @@ long double point_wave_function(long double, uint32_t);
 long double circle_wave_function(long double, uint32_t);
 void create_sound_file(const int16_t *, uint32_t);
 void append_sound_file(const int16_t *, uint32_t);
-void verify_int_header(size_t, size_t, uint8_t);
-void verify_string_header(const char *, size_t, size_t);
+void verify_int_header(const char *, size_t, size_t, uint8_t);
+void verify_string_header(const char *, const char *, size_t, size_t);
 void write_int_data(size_t, uint8_t);
 size_t read_int_data(FILE *, uint8_t);
 void checked_fputc(uint8_t, FILE *);
@@ -473,35 +473,52 @@ void create_sound_file(const int16_t *data, uint32_t data_length) {
 
 /**
  *  Write <length> samples specified in the array <data> to the end of the
- *  output file.
+ *  output file, after verifying and then adjusting the header as needed.
 **/
 void append_sound_file(const int16_t *new_data, uint32_t new_data_length) {
+    // How much larger is the data chunk going to get?
     uint32_t subchunk2_size_addition = new_data_length * NUM_CHANNELS *
                                        BITS_PER_SAMPLE / 8;
-    verify_string_header(CHUNK_ID, CHUNK_ID_OFFSET, CHUNK_ID_SIZE);
-    uint32_t prev_data_length = read_int_data(out, CHUNK_SIZE_SIZE) - 36;
+
+    // How large was the previous data chunk?
     checked_fseek(out, CHUNK_SIZE_OFFSET, SEEK_SET);
-    write_int_data(prev_data_length + subchunk2_size_addition + 36,
-                   CHUNK_SIZE_SIZE);
-    verify_string_header(FORMAT, FORMAT_OFFSET, FORMAT_SIZE);
-    verify_string_header(SUBCHUNK1_ID, SUBCHUNK1_ID_OFFSET, SUBCHUNK1_ID_SIZE);
-    verify_int_header(SUBCHUNK1_SIZE, SUBCHUNK1_SIZE_OFFSET,
+    uint32_t prev_subchunk2_size = read_int_data(out, CHUNK_SIZE_SIZE) - 36;
+
+    // Make sure that all header fields are the expected values before rewriting
+    // any of them.
+    verify_string_header("Chunk ID", CHUNK_ID, CHUNK_ID_OFFSET, CHUNK_ID_SIZE);
+    verify_string_header("Format", FORMAT, FORMAT_OFFSET, FORMAT_SIZE);
+    verify_string_header("Subchunk 1 ID", SUBCHUNK1_ID, SUBCHUNK1_ID_OFFSET,
+                         SUBCHUNK1_ID_SIZE);
+    verify_int_header("Subchunk 1 size", SUBCHUNK1_SIZE, SUBCHUNK1_SIZE_OFFSET,
                       SUBCHUNK1_SIZE_SIZE);
-    verify_int_header(AUDIO_FORMAT, AUDIO_FORMAT_OFFSET, AUDIO_FORMAT_SIZE);
-    verify_int_header(NUM_CHANNELS, NUM_CHANNELS_OFFSET, NUM_CHANNELS_SIZE);
-    // TODO: Adjust the line below to provide a more informative error message.
-    verify_int_header(sample_rate, SAMPLE_RATE_OFFSET, SAMPLE_RATE_SIZE);
-    verify_int_header(BYTE_RATE, BYTE_RATE_OFFSET, BYTE_RATE_SIZE);
-    verify_int_header(BLOCK_ALIGN, BLOCK_ALIGN_OFFSET, BLOCK_ALIGN_SIZE);
-    verify_int_header(BITS_PER_SAMPLE, BITS_PER_SAMPLE_OFFSET,
-                      BITS_PER_SAMPLE_SIZE);
-    verify_string_header(SUBCHUNK2_ID, SUBCHUNK2_ID_OFFSET, SUBCHUNK2_ID_SIZE);
-    verify_int_header(prev_data_length, SUBCHUNK2_SIZE_OFFSET,
-                      SUBCHUNK2_SIZE_SIZE);
+    verify_int_header("Audio format", AUDIO_FORMAT, AUDIO_FORMAT_OFFSET,
+                      AUDIO_FORMAT_SIZE);
+    verify_int_header("Number of channels", NUM_CHANNELS, NUM_CHANNELS_OFFSET,
+                      NUM_CHANNELS_SIZE);
+    verify_int_header("Sample rate", sample_rate, SAMPLE_RATE_OFFSET,
+                      SAMPLE_RATE_SIZE);
+    verify_int_header("Byte rate", BYTE_RATE, BYTE_RATE_OFFSET, BYTE_RATE_SIZE);
+    verify_int_header("Block align", BLOCK_ALIGN, BLOCK_ALIGN_OFFSET,
+                      BLOCK_ALIGN_SIZE);
+    verify_int_header("Bits per sample", BITS_PER_SAMPLE,
+                      BITS_PER_SAMPLE_OFFSET, BITS_PER_SAMPLE_SIZE);
+    verify_string_header("Subchunk 2 ID", SUBCHUNK2_ID, SUBCHUNK2_ID_OFFSET,
+                         SUBCHUNK2_ID_SIZE);
+    verify_int_header("Subchunk 2 size", prev_subchunk2_size,
+                      SUBCHUNK2_SIZE_OFFSET, SUBCHUNK2_SIZE_SIZE);
+
+    // Update fields dependent on the size of the data chunk--namely, the Chunk
+    // Size and Subchunk2 Size fields.
+    checked_fseek(out, CHUNK_SIZE_OFFSET, SEEK_SET);
+    write_int_data(prev_subchunk2_size + subchunk2_size_addition + 36,
+                 CHUNK_SIZE_SIZE);
     checked_fseek(out, SUBCHUNK2_SIZE_OFFSET, SEEK_SET);
     write_int_data((new_data_length * NUM_CHANNELS * BITS_PER_SAMPLE / 8) +
-                   prev_data_length, SUBCHUNK2_SIZE_SIZE);
-    checked_fseek(out, DATA_OFFSET + prev_data_length, SEEK_SET);
+                   prev_subchunk2_size, SUBCHUNK2_SIZE_SIZE);
+
+    // Write the new data, beginning at the end of the existing data chunk.
+    checked_fseek(out, DATA_OFFSET + prev_subchunk2_size, SEEK_SET);
     for(uint32_t i = 0; i < new_data_length; i++) {
         write_int_data(new_data[i], 2);
     }
@@ -511,13 +528,14 @@ void append_sound_file(const int16_t *new_data, uint32_t new_data_length) {
  *  Checks to make sure that the header of <file> matches the given number
  *  <field> of <size> bytes at the given position <offset>.
 **/
-void verify_int_header(size_t field, size_t offset, uint8_t size) {
+void verify_int_header(const char *field_name, size_t field, size_t offset,
+                       uint8_t size) {
     checked_fseek(out, offset, SEEK_SET);
     size_t value = read_int_data(out, size);
     if(field != value) {
-        fprintf(stderr, "%s: File %s appears to be corrupted.\n", program_name,
-                out_name);
-        fprintf(stderr, "Expected header value vs real header value: %zu, %zu\n",
+        fprintf(stderr, "%s: %s: Header field %s appears to be corrupted.\n",
+                program_name, out_name, field_name);
+        fprintf(stderr, "Expected value: %zu; encountered value: %zu.\n",
                 field, value);
         exit(1);
     }
@@ -527,8 +545,8 @@ void verify_int_header(size_t field, size_t offset, uint8_t size) {
  *  Checks to make sure that the header of <file> matches the given string
  *  <field> of <size> bytes at the given position <offset>.
 **/
-void verify_string_header(const char *field, size_t offset,
-                          size_t size) {
+void verify_string_header(const char *field_name, const char *field,
+                          size_t offset, size_t size) {
     checked_fseek(out, offset, SEEK_SET);
     char buf[size];
     if(fread(buf, sizeof(char), size, out) <= 0) {
@@ -536,9 +554,9 @@ void verify_string_header(const char *field, size_t offset,
         exit(1);
     }
     if(strncmp(buf, field, size)) {
-        fprintf(stderr, "%s: File %s appears to be corrupted.\n", program_name,
-                out_name);
-        fprintf(stderr, "Expected header value vs real header value: %s, %s\n",
+        fprintf(stderr, "%s: %s: Header field %s appears to be corrupted.\n",
+                program_name, out_name, field_name);
+        fprintf(stderr, "Expected value: \"%s\"; encountered value: \"%s\".\n",
                 field, buf);
         exit(1);
     }
