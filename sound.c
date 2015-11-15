@@ -224,6 +224,11 @@ int process_flags(int argc, char **argv) {
                 }
                 return optind;
             case 'a':
+                if(out != stdout) {
+                    fprintf(stderr, "%s: Cannot output to multiple files.\n",
+                            program_name);
+                    exit(1);
+                }
                 append_mode = 1;
                 errno = 0;
                 if(!(out = fopen(optarg, "r+"))) {
@@ -234,6 +239,11 @@ int process_flags(int argc, char **argv) {
                 out_name = optarg;
                 break;
             case 'f':
+                if(out != stdout) {
+                    fprintf(stderr, "%s: Cannot output to multiple files.\n",
+                            program_name);
+                    exit(1);
+                }
                 append_mode = 0;
                 errno = 0;
                 if(!(out = fopen(optarg, "w"))) {
@@ -533,7 +543,7 @@ void verify_int_header(const char *field_name, size_t field, size_t offset,
     checked_fseek(out, offset, SEEK_SET);
     size_t value = read_int_data(out, size);
     if(field != value) {
-        fprintf(stderr, "%s: %s: Header field %s appears to be corrupted.\n",
+        fprintf(stderr, "%s: %s: Header field '%s' appears to be corrupted.\n",
                 program_name, out_name, field_name);
         fprintf(stderr, "Expected value: %zu; encountered value: %zu.\n",
                 field, value);
@@ -554,7 +564,7 @@ void verify_string_header(const char *field_name, const char *field,
         exit(1);
     }
     if(strncmp(buf, field, size)) {
-        fprintf(stderr, "%s: %s: Header field %s appears to be corrupted.\n",
+        fprintf(stderr, "%s: %s: Header field '%s' appears to be corrupted.\n",
                 program_name, out_name, field_name);
         fprintf(stderr, "Expected value: \"%s\"; encountered value: \"%s\".\n",
                 field, buf);
