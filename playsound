@@ -1,0 +1,3 @@
+#!/bin/bash
+
+play <(./sound $*) 2> /dev/null
