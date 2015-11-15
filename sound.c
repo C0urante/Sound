@@ -96,6 +96,7 @@ static const char *const default_out_name = "stdout";
 
 int main(int argc, char **argv) {
     int argindex = process_flags(argc, argv);
+    uint32_t num_samples = get_num_samples(duration);
     int num_pitches = argc - argindex;
     int num_frequencies = (num_overtones + 1) * num_pitches;
     long double frequencies[num_frequencies];
@@ -106,7 +107,6 @@ int main(int argc, char **argv) {
             frequencies[(p * (num_overtones + 1)) + o] = (o + 1) * fundamental;
         }
     }
-    uint32_t num_samples = get_num_samples(duration);
     int16_t *samples = create_samples(frequencies, num_frequencies, amplitude,
                                       num_samples, wave_function);
     write_sound_file(samples, num_samples);
@@ -181,7 +181,8 @@ int process_flags(int argc, char **argv) {
                 duration = parse_int_opt(optarg, "Duration", 1, UINT32_MAX);
                 break;
             case 'a':
-                amplitude = parse_float_opt(optarg, "Amplitude", 0.000001, 100);
+                amplitude = parse_float_opt(optarg, "Amplitude",
+                                           (long double)100 / INT16_MAX, 100);
                 break;
             case 's':
                 sample_rate = parse_int_opt(optarg, "Sample rate", 1,
@@ -289,9 +290,15 @@ long double parse_float_opt(const char *opt, const char *optname,
 /**
  *  Returns the number of samples required to cover <duration> milliseconds,
  *  accounting for possible truncation.
+ *  If an overflow would occur, print an error message and exit.
 **/
 uint32_t get_num_samples(uint32_t duration) {
-    uint32_t result = (duration * sample_rate) / 1000;
+    size_t result = (duration / 1000) * sample_rate;
+    if(result > UINT32_MAX) {
+        fprintf(stderr, "%s: Duration of %u and sample rate of %u combine to "
+                        "create a file that is too large to store in WAVE "
+                        "format.\n", program_name, duration, sample_rate);
+    }
     if((duration * sample_rate) % 1000) {
         return result + 1;
     } else {
@@ -307,10 +314,10 @@ uint32_t get_num_samples(uint32_t duration) {
  *  Return the resulting array.
 **/
 int16_t *create_samples(long double *frequencies, uint8_t num_frequencies,
-                        long double amplitude, uint32_t duration,
+                        long double amplitude, uint32_t num_samples,
                         long double (*wave_function)(long double, uint32_t)) {
-    int16_t *result = malloc(sizeof(uint16_t) * duration);
-    for(uint32_t t = 0; t < duration; t++) {
+    int16_t *result = malloc(sizeof(uint16_t) * num_samples);
+    for(uint32_t t = 0; t < num_samples; t++) {
         long double sample = 0;
         for(uint8_t f = 0; f < num_frequencies; f++) {
             sample += ((amplitude / 100) * INT16_MAX *
