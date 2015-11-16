@@ -90,6 +90,7 @@ void checked_fputc(uint8_t, FILE *);
 void checked_fprintf(FILE *, const char *, ...);
 uint8_t checked_fgetc(FILE *);
 void checked_fseek(FILE *, long, int);
+void close_out(void);
 
 
 /* Used for calls to perror(). */
@@ -159,9 +160,6 @@ int main(int argc, char **argv) {
         create_sound_file(samples, num_samples);
     }
     free(samples);
-    if(out != stdout) {
-        fclose(out);
-    }
     return 0;
 }
 
@@ -236,6 +234,7 @@ int process_flags(int argc, char **argv) {
                             strerror(errno));
                     exit(1);
                 }
+                atexit(close_out);
                 out_name = optarg;
                 break;
             case 'f':
@@ -251,6 +250,7 @@ int process_flags(int argc, char **argv) {
                             strerror(errno));
                     exit(1);
                 }
+                atexit(close_out);
                 out_name = optarg;
                 break;
             case 'd':
@@ -624,7 +624,7 @@ void checked_fprintf(FILE *file, const char *format, ...) {
 
 /**
  *  Attempts to read a byte from <file>, and return it. If failure is detected,
- *  prints an error message and exists the program.
+ *  prints an error message and exits the program.
 **/
 uint8_t checked_fgetc(FILE *file) {
     int result = fgetc(file);
@@ -634,8 +634,20 @@ uint8_t checked_fgetc(FILE *file) {
     return (uint8_t)result;
 }
 
+/**
+ *  Attempts to perform a call to fseek with the provided arguments. If failure
+ *  is detected, prings an error message and exists the program.
+**/
 void checked_fseek(FILE *file, long offset, int whence) {
     if(fseek(file, offset, whence)) {
         fprintf(stderr, "%s: %s: Seek failed.\n", program_name, out_name);
     }
+}
+
+/**
+ *  Close the file stream <out>. Intended for use as an exit
+ *  handler.
+**/
+void close_out(void) {
+    fclose(out);
 }
