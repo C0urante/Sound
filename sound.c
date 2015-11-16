@@ -377,13 +377,13 @@ uint32_t get_num_samples(uint32_t duration) {
         low = duration;
         high = sample_rate;
     }
-    if(low / 1000 >= UINT32_MAX / high) {
+    if(low / 1000 > UINT32_MAX / high) {
         fprintf(stderr, "%s: Duration of %u and sample rate of %u would  "
                         "combine to create a file that is too large to store "
                         "in WAVE format.\n", program_name, duration,
                         sample_rate);
         exit(1);
-    } else if(low >= UINT32_MAX / high) {
+    } else if(low > UINT32_MAX / high) {
         return ((high / 1000) + 1) * low;
     } else {
         return ((high * low) / 1000) + 1;
