@@ -72,16 +72,16 @@ long parse_int_opt(const char *, const char *, long, long);
 long double parse_float_opt(const char *, const char *, long double,
                             long double);
 uint32_t get_num_samples(uint32_t);
-int16_t *create_samples(long double *, uint8_t, long double, uint32_t,
-                        long double(long double, uint32_t));
+void write_samples(long double *, uint8_t, long double, uint32_t,
+                   long double(long double, uint32_t));
 long double sine_wave_function(long double, uint32_t);
 long double square_wave_function(long double, uint32_t);
 long double triangle_wave_function(long double, uint32_t);
 long double sawtooth_wave_function(long double, uint32_t);
 long double point_wave_function(long double, uint32_t);
 long double circle_wave_function(long double, uint32_t);
-void create_sound_file(const int16_t *, uint32_t);
-void append_sound_file(const int16_t *, uint32_t);
+void create_sound_file(uint32_t);
+void append_sound_file(uint32_t);
 void verify_int_header(const char *, size_t, size_t, uint8_t);
 void verify_string_header(const char *, const char *, size_t, size_t);
 void write_int_data(size_t, uint8_t);
@@ -141,6 +141,7 @@ static const uint8_t default_append_mode = 0;
 
 int main(int argc, char **argv) {
     int argindex = process_flags(argc, argv);
+
     uint32_t num_samples = get_num_samples(duration);
     int num_pitches = argc - argindex;
     int num_frequencies = (num_overtones + 1) * num_pitches;
@@ -152,14 +153,16 @@ int main(int argc, char **argv) {
             frequencies[(p * (num_overtones + 1)) + o] = (o + 1) * fundamental;
         }
     }
-    int16_t *samples = create_samples(frequencies, num_frequencies, volume,
-                                      num_samples, wave_function);
+
     if(append_mode) {
-        append_sound_file(samples, num_samples);
+        append_sound_file(num_samples);
     } else {
-        create_sound_file(samples, num_samples);
+        create_sound_file(num_samples);
     }
-    free(samples);
+
+    write_samples(frequencies, num_frequencies, volume, num_samples,
+                  wave_function);
+
     return 0;
 }
 
@@ -391,25 +394,21 @@ uint32_t get_num_samples(uint32_t duration) {
 }
 
 /**
- *  Create a sample array representing each pitch in the array <frequencies>
- *  of length <num_frequencies> being played for <duration> samples with a
- *  maximum value of <volume> for each sample and a given <wave_function>.
- *
- *  Return the resulting array.
+ *  Write <num_samples> samples for each pitch in the array <frequencies> of
+ *  length <num_crequencies> with a maximum value of <volume> and a given
+ *  <wave_function>.
 **/
-int16_t *create_samples(long double *frequencies, uint8_t num_frequencies,
-                        long double volume, uint32_t num_samples,
-                        long double (*wave_function)(long double, uint32_t)) {
-    int16_t *result = malloc(sizeof(uint16_t) * num_samples);
+void write_samples(long double *frequencies, uint8_t num_frequencies,
+                   long double volume, uint32_t num_samples,
+                   long double (*wave_function)(long double, uint32_t)) {
     for(uint32_t t = 0; t < num_samples; t++) {
         long double sample = 0;
         for(uint8_t f = 0; f < num_frequencies; f++) {
             sample += ((volume / 100) * INT16_MAX *
                       wave_function(frequencies[f], t)) / num_frequencies;
         }
-        result[t] = (int16_t)sample;
+        write_int_data((int16_t)sample, 2);
     }
-    return result;
 }
 
 /**
@@ -466,9 +465,9 @@ long double circle_wave_function(long double frequency, uint32_t time) {
 
 
 /**
- *  Write <length> samples specified in the array <data> to the output file.
+ *  Prepare to write <data_length> samples to the output file.
 **/
-void create_sound_file(const int16_t *data, uint32_t data_length) {
+void create_sound_file(uint32_t data_length) {
     uint32_t subchunk2_size = data_length * NUM_CHANNELS * BITS_PER_SAMPLE / 8;
     checked_fprintf(out, "%s", CHUNK_ID);
     write_int_data(36 + subchunk2_size, CHUNK_SIZE_SIZE);
@@ -483,17 +482,14 @@ void create_sound_file(const int16_t *data, uint32_t data_length) {
     write_int_data(BITS_PER_SAMPLE, BITS_PER_SAMPLE_SIZE);
     checked_fprintf(out, "%s", SUBCHUNK2_ID);
     write_int_data(subchunk2_size, SUBCHUNK2_SIZE_SIZE);
-    for(uint32_t i = 0; i < data_length; i++) {
-        write_int_data(data[i], 2);
-    }
 }
 
 
 /**
- *  Write <length> samples specified in the array <data> to the end of the
- *  output file, after verifying and then adjusting the header as needed.
+ *  Prepare to write <new_data_length> samples to the end of hte output file,
+ *  by erifying and then adjusting the header as needed.
 **/
-void append_sound_file(const int16_t *new_data, uint32_t new_data_length) {
+void append_sound_file(uint32_t new_data_length) {
     // How much larger is the data chunk going to get?
     uint32_t subchunk2_size_addition = new_data_length * NUM_CHANNELS *
                                        BITS_PER_SAMPLE / 8;
@@ -535,11 +531,9 @@ void append_sound_file(const int16_t *new_data, uint32_t new_data_length) {
     write_int_data((new_data_length * NUM_CHANNELS * BITS_PER_SAMPLE / 8) +
                    prev_subchunk2_size, SUBCHUNK2_SIZE_SIZE);
 
-    // Write the new data, beginning at the end of the existing data chunk.
+    // Prepare to write the new data, beginning at the end of the existing data
+    // chunk.
     checked_fseek(out, DATA_OFFSET + prev_subchunk2_size, SEEK_SET);
-    for(uint32_t i = 0; i < new_data_length; i++) {
-        write_int_data(new_data[i], 2);
-    }
 }
 
 /**
@@ -644,7 +638,7 @@ uint8_t checked_fgetc(FILE *file) {
 
 /**
  *  Attempts to perform a call to fseek with the provided arguments. If failure
- *  is detected, prings an error message and exists the program.
+ *  is detected, prints an error message and exists the program.
 **/
 void checked_fseek(FILE *file, long offset, int whence) {
     if(fseek(file, offset, whence)) {
